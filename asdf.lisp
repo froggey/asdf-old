@@ -808,7 +808,7 @@ UNINTERN -- Remove symbols here from PACKAGE."
   #+(or mcl cmucl) (:shadow #:user-homedir-pathname))
 (in-package :uiop/common-lisp)
 
-#-(or abcl allegro clasp clisp clozure cmucl cormanlisp ecl gcl genera lispworks mcl mkcl sbcl scl xcl)
+#-(or abcl allegro clasp clisp clozure cmucl cormanlisp ecl gcl genera lispworks mcl mezzano mkcl sbcl scl xcl)
 (error "ASDF is not supported on your implementation. Please help us port it.")
 
 ;; (declaim (optimize (speed 1) (debug 3) (safety 3))) ; DON'T: trust implementation defaults.
@@ -816,7 +816,7 @@ UNINTERN -- Remove symbols here from PACKAGE."
 
 ;;;; Early meta-level tweaks
 
-#+(or allegro clasp clisp cmucl ecl mkcl mkcl sbcl)
+#+(or allegro clasp clisp cmucl ecl mkcl mezzano mkcl sbcl)
 (eval-when (:load-toplevel :compile-toplevel :execute)
   (when (and #+allegro (member :ics *features*)
              #+(or clasp clisp cmucl ecl mkcl) (member :unicode *features*)
@@ -1671,13 +1671,18 @@ keywords explicitly."
     "Is the underlying operating system an (emulated?) MacOS 9 or earlier?"
     (featurep :mcl))
 
+  (defun os-mezzano-p ()
+    "Is the underlying operating system Mezzano?"
+    (featurep :mezzano))
+
   (defun detect-os ()
     "Detects the current operating system. Only needs be run at compile-time,
 except on ABCL where it might change between FASL compilation and runtime."
     (loop* :with o
            :for (feature . detect) :in '((:os-unix . os-unix-p) (:os-macosx . os-macosx-p)
                                          (:os-windows . os-windows-p)
-                                         (:genera . os-genera-p) (:os-oldmac . os-oldmac-p))
+                                         (:genera . os-genera-p) (:os-oldmac . os-oldmac-p)
+                                         (:mezzano . os-mezzano-p))
            :when (and (or (not o) (eq feature :os-macosx)) (funcall detect))
            :do (setf o feature) (pushnew feature *features*)
            :else :do (setf *features* (remove feature *features*))
@@ -1722,9 +1727,11 @@ use getenvp to return NIL in such a case."
                 (ccl:%get-cstring value))))
     #+mkcl (#.(or (find-symbol* 'getenv :si nil) (find-symbol* 'getenv :mk-ext nil)) x)
     #+sbcl (sb-ext:posix-getenv x)
-    #-(or abcl allegro clasp clisp clozure cmucl cormanlisp ecl gcl genera lispworks mcl mkcl sbcl scl xcl)
+    #+mezzano nil
+    #-(or abcl allegro clasp clisp clozure cmucl cormanlisp ecl gcl genera lispworks mcl mezzano mkcl sbcl scl xcl)
     (error "~S is not supported on your implementation" 'getenv))
 
+  #-mezzano
   (defsetf getenv (x) (val)
     "Set an environment variable."
       (declare (ignorable x val))
@@ -1738,6 +1745,10 @@ use getenvp to return NIL in such a case."
     #+sbcl `(progn (require :sb-posix) (symbol-call :sb-posix :setenv ,x ,val 1))
     #-(or allegro clisp clozure cmucl ecl lispworks mkcl sbcl)
     '(error "~S ~S is not supported on your implementation" 'setf 'getenv))
+  #+mezzano
+  (defun (setf getenv) (val x)
+    (declare (ignore val x))
+    (error "~S ~S is not supported on Mezzano" 'setf 'getenv))
 
   (defun getenvp (x)
     "Predicate that is true if the named variable is present in the libc environment,
@@ -1768,7 +1779,7 @@ then returning the non-empty string value of the variable"
      '(:abcl (:acl :allegro) (:ccl :clozure) :clisp (:corman :cormanlisp)
        (:cmu :cmucl :cmu) :clasp :ecl :gcl
        (:lwpe :lispworks-personal-edition) (:lw :lispworks)
-       :mcl :mkcl :sbcl :scl (:smbx :symbolics) :xcl)))
+       :mcl :mezzano :mkcl :sbcl :scl (:smbx :symbolics) :xcl)))
 
   (defvar *implementation-type* (implementation-type)
     "The type of Lisp implementation used, as a short UIOP-standardized keyword")
@@ -1783,7 +1794,8 @@ then returning the non-empty string value of the variable"
        (:solaris :solaris :sunos)
        (:bsd :bsd :freebsd :netbsd :openbsd :dragonfly)
        :unix
-       :genera)))
+       :genera
+       :mezzano)))
 
   (defun architecture ()
     "The CPU architecture of the current host"
@@ -1842,6 +1854,7 @@ then returning the non-empty string value of the variable"
         (multiple-value-bind (major minor) (sct:get-system-version "System")
           (format nil "~D.~D" major minor))
         #+mcl (subseq s 8) ; strip the leading "Version "
+        #+mezzano (format nil "~A-~D" s sys.int::*llf-version*)
         s))))
 
   (defun implementation-identifier ()
@@ -1862,7 +1875,7 @@ suitable for use as a directory name to segregate Lisp FASLs, C dynamic librarie
   (defun hostname ()
     "return the hostname of the current host"
     ;; Note: untested on RMCL
-    #+(or abcl clasp clozure cmucl ecl genera lispworks mcl mkcl sbcl scl xcl) (machine-instance)
+    #+(or abcl clasp clozure cmucl ecl genera lispworks mcl mezzano mkcl sbcl scl xcl) (machine-instance)
     #+cormanlisp "localhost" ;; is there a better way? Does it matter?
     #+allegro (symbol-call :excl.osi :gethostname)
     #+clisp (first (split-string (machine-instance) :separator " "))
@@ -1882,7 +1895,7 @@ suitable for use as a directory name to segregate Lisp FASLs, C dynamic librarie
 
   (defun getcwd ()
     "Get the current working directory as per POSIX getcwd(3), as a pathname object"
-    (or #+(or abcl genera xcl) (truename *default-pathname-defaults*) ;; d-p-d is canonical!
+    (or #+(or abcl genera mezzano xcl) (truename *default-pathname-defaults*) ;; d-p-d is canonical!
         #+allegro (excl::current-directory)
         #+clisp (ext:default-directory)
         #+clozure (ccl:current-directory)
@@ -1900,7 +1913,7 @@ suitable for use as a directory name to segregate Lisp FASLs, C dynamic librarie
   (defun chdir (x)
     "Change current directory, as per POSIX chdir(2), to a given pathname object"
     (if-let (x (pathname x))
-      #+(or abcl genera xcl) (setf *default-pathname-defaults* (truename x)) ;; d-p-d is canonical!
+      #+(or abcl genera mezzano xcl) (setf *default-pathname-defaults* (truename x)) ;; d-p-d is canonical!
       #+allegro (excl:chdir x)
       #+clisp (ext:cd x)
       #+clozure (setf (ccl:current-directory) x)
@@ -2092,7 +2105,7 @@ by the underlying implementation's MAKE-PATHNAME and other primitives"
   ;; This will be :unspecific if supported, or NIL if not.
   (defparameter *unspecific-pathname-type*
     #+(or abcl allegro clozure cmucl genera lispworks sbcl scl) :unspecific
-    #+(or clasp clisp ecl mkcl gcl xcl #|These haven't been tested:|# cormanlisp mcl) nil
+    #+(or clasp clisp ecl mkcl gcl xcl #|These haven't been tested:|# cormanlisp mcl mezzano) nil
     "Unspecific type component to use with the underlying implementation's MAKE-PATHNAME")
 
   (defun make-pathname* (&rest keys &key directory host device name type version defaults
@@ -4249,6 +4262,9 @@ This is designed to abstract away the implementation specific quit forms."
           (dbg:*debug-print-level* *print-level*)
           (dbg:*debug-print-length* *print-length*))
       (dbg:bug-backtrace nil))
+    #+mezzano
+    (let ((*standard-output* stream))
+      (sys.int::backtrace count))
     #+sbcl
     (sb-debug:print-backtrace :stream stream :count (or count most-positive-fixnum))
     #+xcl
@@ -4337,12 +4353,12 @@ depending on whether *LISP-INTERACTION* is set, enter debugger or die"
     #+clozure ccl:*command-line-argument-list*
     #+(or cmucl scl) extensions:*command-line-strings*
     #+gcl si:*command-args*
-    #+(or genera mcl) nil
+    #+(or genera mcl mezzano) nil
     #+lispworks sys:*line-arguments-list*
     #+mkcl (loop :for i :from 0 :below (mkcl:argc) :collect (mkcl:argv i))
     #+sbcl sb-ext:*posix-argv*
     #+xcl system:*argv*
-    #-(or abcl allegro clasp clisp clozure cmucl ecl gcl genera lispworks mcl mkcl sbcl scl xcl)
+    #-(or abcl allegro clasp clisp clozure cmucl ecl gcl genera lispworks mcl mezzano mkcl sbcl scl xcl)
     (error "raw-command-line-arguments not implemented yet"))
 
   (defun command-line-arguments (&optional (arguments (raw-command-line-arguments)))
@@ -6846,7 +6862,7 @@ previously-loaded version of ASDF."
          ;; "3.4.5.67" would be a development version in the official branch, on top of 3.4.5.
          ;; "3.4.5.0.8" would be your eighth local modification of official release 3.4.5
          ;; "3.4.5.67.8" would be your eighth local modification of development version 3.4.5.67
-         (asdf-version "3.1.7")
+         (asdf-version "3.1.7.0.1")
          (existing-version (asdf-version)))
     (setf *asdf-version* asdf-version)
     (when (and existing-version (not (equal asdf-version existing-version)))
@@ -11568,7 +11584,7 @@ Please use UIOP:RUN-PROGRAM instead."
 (in-package :asdf/footer)
 
 ;;;; Hook ASDF into the implementation's REQUIRE and other entry points.
-#+(or abcl clasp clisp clozure cmucl ecl mkcl sbcl)
+#+(or abcl clasp clisp clozure cmucl ecl mezzano mkcl sbcl)
 (with-upgradability ()
   (if-let (x (and #+clisp (find-symbol* '#:*module-provider-functions* :custom nil)))
     (eval `(pushnew 'module-provide-asdf
@@ -11576,6 +11592,7 @@ Please use UIOP:RUN-PROGRAM instead."
                     #+(or clasp cmucl ecl) ext:*module-provider-functions*
                     #+clisp ,x
                     #+clozure ccl:*module-provider-functions*
+                    #+mezzano sys.int::*require-hooks*
                     #+mkcl mk-ext:*module-provider-functions*
                     #+sbcl sb-ext:*module-provider-functions*)))
 

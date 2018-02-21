@@ -1854,7 +1854,9 @@ then returning the non-empty string value of the variable"
         (multiple-value-bind (major minor) (sct:get-system-version "System")
           (format nil "~D.~D" major minor))
         #+mcl (subseq s 8) ; strip the leading "Version "
-        #+mezzano (format nil "~A-~D" s sys.int::*llf-version*)
+        #+mezzano (format nil "~A-~D"
+                          (subseq s 0 (position #\space s)) ; strip commit hash
+                          sys.int::*llf-version*)
         s))))
 
   (defun implementation-identifier ()
